@@ -1,4 +1,4 @@
-version: '2'
+version: '3'
 
 volumes:
   mongodb_data: { driver: local }
@@ -6,7 +6,7 @@ volumes:
 services:
   rocketchat:
     image: registry.rocket.chat/rocketchat/rocket.chat:${RELEASE:-latest}
-    restart: on-failure
+    restart: always
     labels:
       traefik.enable: "true"
       traefik.http.routers.rocketchat.rule: Host(`${DOMAIN}`)
@@ -20,7 +20,7 @@ services:
       MONGO_OPLOG_URL: "${MONGO_OPLOG_URL:\
         -mongodb://${MONGODB_ADVERTISED_HOSTNAME:-mongodb}:${MONGODB_INITIAL_PRIMARY_PORT_NUMBER:-27017}/\
         local?replicaSet=${MONGODB_REPLICA_SET_NAME:-rs0}}"
-      ROOT_URL: ${ROOT_URL:-http://localhost:${HOST_PORT:-3000}}
+      ROOT_URL: ${ROOT_URL:-http://chat.vpclouds.net:${HOST_PORT:-3000}}
       PORT: ${PORT:-3000}
       DEPLOY_METHOD: docker
       DEPLOY_PLATFORM: ${DEPLOY_PLATFORM}
@@ -64,15 +64,15 @@ services:
     environment:
       - DATABASE_URL=postgres://postgres:secretpw@postgres:5435/botpress_db
       - REDIS_URL=redis://redis:6379?password=redisPassword
-      - EXTERNAL_URL=http://localhost:3001
-      #- BP_MODULE_NLU_DUCKLINGURL=http://botpress_lang:8000
-      #- BP_MODULE_NLU_LANGUAGESOURCES=[{"endpoint":"http://botpress_lang:3100"}]
+      - EXTERNAL_URL=https://bot.vpclouds.net
+      - BP_MODULE_NLU_DUCKLINGURL=http://botpress_lang:8000
+      - BP_MODULE_NLU_LANGUAGESOURCES=[{"endpoint":"http://botpress_lang:3100"}]
       #- CLUSTER_ENABLED=true
       - BP_PRODUCTION=true
       - BPFS_STORAGE=database
     user: root
     depends_on:
-      #- botpress_lang
+      - botpress_nlu
       - postgres
       - redis
     volumes:
@@ -81,14 +81,43 @@ services:
     ports:
       - "3001:3000"
 
-  # botpress_lang:
-  #   image: botpress-lang
-  #   command: bash -c "./duckling -p 8000 & ./bp lang --langDir /botpress/lang --port 3100"
-  #   expose:
-  #     - 3100
-  #     - 8000
-  #   volumes:
-  #     - ./botpress/language:/botpress/lang
+#    botpress_lang:
+#      image: botpress-lang
+#      command: bash -c "./duckling -p 8000 & ./bp lang --langDir /botpress/lang --port 3100"
+#      expose:
+#        - 3100
+#        - 8000
+#      volumes:
+#        - botpressdata:/botpress/lang
+
+  botpress_lang:
+    image: botpress/server:latest
+    #container_name: botpress-lang
+    command: ./bp lang --offline --dim 300 --langDir /botpress/lang --port 3100
+    expose:
+      - 3100
+    ports:
+      - 3100:3100
+    volumes:
+      - ./botpress/language:/botpress/lang
+
+  botpress_duckling:
+    image: botpress/server:latest
+    #container_name: botpress-duckling
+    command: ./duckling -p 8000
+    expose:
+      - 8000
+  # Each instance of botpress must have its own NLU server
+  # connections between multiple botpress instances and NLU server cannot be load balanced
+  botpress_nlu:
+    image: botpress/server:latest
+    #container_name: botpress-nlu
+    command: ./bp nlu --port 3200 --dbURL postgres://postgres:secretpw@postgres:5435/botpress_db --languageURL http://botpress_lang:3100 --ducklingUR>
+    expose:
+      - 3200
+    depends_on:
+      - botpress_duckling
+      - botpress_lang
 
   postgres:
     image: postgres:14-alpine
